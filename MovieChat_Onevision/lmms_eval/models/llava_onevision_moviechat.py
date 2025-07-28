@@ -3,7 +3,6 @@ import json
 import logging
 import math
 import os
-import re
 import warnings
 from datetime import timedelta
 from typing import List, Optional, Tuple, Union
@@ -16,7 +15,6 @@ import transformers
 from accelerate import Accelerator, DistributedType, InitProcessGroupKwargs
 from accelerate.state import AcceleratorState
 from decord import VideoReader, cpu
-from moviepy.video.io.VideoFileClip import VideoFileClip
 from packaging import version
 from PIL import Image
 from tqdm import tqdm
@@ -91,7 +89,8 @@ class Llava_OneVision_MovieChat(lmms):
         tmp_folder: Optional[str] = "tmp/",
         mm_spatial_pool_stride: Optional[int] = 2,
         mm_spatial_pool_mode: Optional[str] = "bilinear",
-        token_strategy: Optional[str] = "single",  # could be "single" or "multiple", "multiple" denotes adding multiple <image> tokens for each frame
+        # could be "single" or "multiple", "multiple" denotes adding multiple <image> tokens for each frame
+        token_strategy: Optional[str] = "single",
         video_decode_backend: str = "decord",
         **kwargs,
     ) -> None:
@@ -132,7 +131,10 @@ class Llava_OneVision_MovieChat(lmms):
         self.long_memory_length = long_memory_length
         self.merge_frame_length = merge_frame_length
         self.sliding_window_length = sliding_window_length
-        self.num_clips = (self.long_memory_length // self.merge_frame_length) * ((self.short_memory_length - self.merge_frame_length) // self.sliding_window_length)
+        # Calculate number of clips based on memory lengths
+        long_clips = self.long_memory_length // self.merge_frame_length
+        short_clips = (self.short_memory_length - self.merge_frame_length) // self.sliding_window_length
+        self.num_clips = long_clips * short_clips
         self.tmp_folder = tmp_folder
 
         overwrite_config = {}
@@ -140,7 +142,8 @@ class Llava_OneVision_MovieChat(lmms):
         overwrite_config["mm_spatial_pool_mode"] = self.mm_spatial_pool_mode
         cfg_pretrained = AutoConfig.from_pretrained(self.pretrained)
 
-        if cfg_pretrained.architectures[0] == "LlavaLlamaForCausalLM":  # Ugly code, only used in  vicuna that needs ROPE
+        # Ugly code, only used in vicuna that needs ROPE
+        if cfg_pretrained.architectures[0] == "LlavaLlamaForCausalLM":
             if "224" in cfg_pretrained.mm_vision_tower:
                 least_token_number = self.max_frames_num * (16 // self.mm_spatial_pool_stride) ** 2 + 1000
             else:
@@ -379,16 +382,42 @@ class Llava_OneVision_MovieChat(lmms):
                         # try:
                         os.makedirs(self.tmp_folder, exist_ok=True)
 
-                        video = VideoFileClip(visual[0])
-                        clip_duration = video.duration / self.num_clips
+                        # Use decord instead of MoviePy to avoid FFMPEG issues
+                        vr = VideoReader(visual[0], ctx=cpu(0))
+                        total_frame_num = len(vr)
+                        fps = vr.get_avg_fps()
+                        duration = total_frame_num / fps
+                        clip_duration = duration / self.num_clips
 
                         cur_frame = 0
                         for i in range(self.num_clips):
                             start_time = i * clip_duration
                             end_time = start_time + clip_duration
-                            # uniformly sample self.sliding_window_length frames from the video from start_time to end_time
-                            frames = list(video.subclip(start_time, end_time).iter_frames(fps=self.sliding_window_length / clip_duration))[: self.sliding_window_length]
-                            frames = [Image.fromarray(frame).convert("RGB") for frame in frames]
+                            
+                            # Convert time to frame indices
+                            start_frame = int(start_time * fps)
+                            end_frame = int(end_time * fps) 
+                            
+                            # Ensure we don't exceed video bounds
+                            start_frame = max(0, start_frame)
+                            end_frame = min(total_frame_num - 1, end_frame)
+                            
+                            # Sample frames uniformly within the clip
+                            if end_frame > start_frame:
+                                frame_indices = np.linspace(start_frame, end_frame, self.sliding_window_length, dtype=int)
+                                frame_indices = frame_indices[:self.sliding_window_length]  # Ensure we don't exceed sliding_window_length
+                            else:
+                                # If clip is too short, just use the start frame
+                                frame_indices = [start_frame] * min(self.sliding_window_length, 1)
+                            
+                            # Get the actual frames
+                            if len(frame_indices) > 0:
+                                clip_frames = vr.get_batch(frame_indices.tolist()).asnumpy()
+                                frames = [Image.fromarray(frame).convert("RGB") for frame in clip_frames]
+                            else:
+                                # Fallback: create black frames if no frames available
+                                frames = [Image.new("RGB", (224, 224), color=(0, 0, 0)) for _ in range(self.sliding_window_length)]
+                            
                             preprocess_frames = self._image_processor.preprocess(frames, return_tensors="pt")["pixel_values"].half().cuda()
                             encoded_window = self.model.encode_images(preprocess_frames)  # [frames, 729,3584]
 
