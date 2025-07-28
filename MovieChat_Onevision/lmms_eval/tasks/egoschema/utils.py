@@ -24,12 +24,15 @@ with open(Path(__file__).parent / "_default_template_yaml", "r") as f:
 # We will unzip all the zip files
 # To HF HOME cache dir
 # And load it here
-HF_HOME = os.environ["HF_HOME"] if "HF_HOME" in os.environ else os.path.expanduser("~/.cache/huggingface/hub")
+HF_HOME = os.environ["HF_HOME"] if "HF_HOME" in os.environ else os.path.expanduser("~/.cache/huggingface/")
 cache_dir = config["dataset_kwargs"]["cache_dir"]
 cache_dir = os.path.join(HF_HOME, cache_dir)
 cache_dir = os.path.join(cache_dir, "videos")
 
 from loguru import logger as eval_logger
+
+import re
+import requests
 
 
 # Pass in video path here
@@ -201,15 +204,39 @@ def egoschema_aggregate_submissions(results, args, task):
     for submission_dict in results:
         combined_submission.update(submission_dict)
 
+    # Define the URL and headers
+    url = "https://validation-server.onrender.com/api/upload/"
+    headers = {"Content-Type": "application/json"}
+
+    while True:
+        # Send the POST request
+        response = requests.post(url, headers=headers, json=combined_submission)
+
+        # Check the response status and log the output
+        if response.status_code == 200:
+            eval_logger.info(f"Submission successful: {response.text}")
+            # Extract the accuracy of the total result using regular expression
+            match = re.search(r"Total result: \d+ correct, \d+ wrong, \d+ missing, \d+ invalid, accuracy: ([\d.]+)", response.text)
+            if match:
+                total_accuracy = float(match.group(1)) * 100
+                eval_logger.info(f"Total accuracy: {total_accuracy}")
+            else:
+                eval_logger.info(f"Total accuracy not found in the response.")
+                total_accuracy = 0
+            break
+        else:
+            eval_logger.error(f"Submission failed with status code {response.status_code}: {response.text}")
+
     with open(path, "w") as f:
         json.dump(combined_submission, f, indent=4)
 
     eval_logger.info(f"Submission file saved to {path}")
+    return total_accuracy
 
 
 # Factory into different aggregate
 def egoschema_aggregate_mc(results, args):
-    egoschema_aggregate_submissions(results, args, "MC")
+    return egoschema_aggregate_submissions(results, args, "MC")
 
 
 def egoschema_aggregate_mc_ppl(results, args):
