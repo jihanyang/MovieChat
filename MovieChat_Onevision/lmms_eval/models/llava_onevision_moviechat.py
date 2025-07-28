@@ -153,7 +153,8 @@ class Llava_OneVision_MovieChat(lmms):
                 overwrite_config["tokenizer_model_max_length"] = 4096 * scaling_factor
 
         llava_model_args["overwrite_config"] = overwrite_config
-        from LLaVA_NeXT.llava.model.builder import load_pretrained_model
+        
+        from llava.model.builder import load_pretrained_model
 
         try:
             # Try to load the model with the multimodal argument
@@ -524,3 +525,6 @@ class Llava_OneVision_MovieChat(lmms):
 
         pbar.close()
         return res
+    
+    def generate_until_multi_round(self, requests) -> List[str]:
+        raise NotImplementedError("MovieChat only supports generation.")

@@ -2,6 +2,7 @@ import ast
 import datetime
 import json
 import os
+from os.path import realpath
 import sys
 import time
 from pathlib import Path
@@ -40,7 +41,7 @@ if API_TYPE == "openai":
 # But the idea is that we will unzip all the zip files
 # To HF HOME cache dir
 # And load it here
-HF_HOME = os.environ["HF_HOME"]
+HF_HOME = os.environ.get("HF_HOME", realpath("~/.cache/huggingface"))
 cache_dir = config["dataset_kwargs"]["cache_dir"]
 cache_dir = os.path.join(HF_HOME, cache_dir)
 cache_dir = os.path.join(cache_dir, "Test_Videos")
@@ -80,15 +81,15 @@ def moviechat_doc_to_visual_breakpoint(doc):
 
 
 # format the question
-def moviechat_doc_to_text(doc, model_specific_prompt_kwargs=None):
-    if model_specific_prompt_kwargs is None:
-        model_specific_prompt_kwargs = {}
+def moviechat_doc_to_text(doc, lmms_eval_specific_kwargs=None):
+    if lmms_eval_specific_kwargs is None:
+        lmms_eval_specific_kwargs = {}
     pre_prompt = ""
     post_prompt = ""
-    if "pre_prompt" in model_specific_prompt_kwargs:
-        pre_prompt = model_specific_prompt_kwargs["pre_prompt"]
-    if "post_prompt" in model_specific_prompt_kwargs:
-        post_prompt = model_specific_prompt_kwargs["post_prompt"]
+    if "pre_prompt" in lmms_eval_specific_kwargs:
+        pre_prompt = lmms_eval_specific_kwargs["pre_prompt"]
+    if "post_prompt" in lmms_eval_specific_kwargs:
+        post_prompt = lmms_eval_specific_kwargs["post_prompt"]
 
     question = doc["question"]
     return f"{pre_prompt}{question}{post_prompt}"

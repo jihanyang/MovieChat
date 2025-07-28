@@ -49,6 +49,7 @@ AVAILABLE_MODELS = {
     "oryx": "Oryx",
     "videochat2": "VideoChat2",
     "llama_vision": "LlamaVision",
+    "llava_onevision_moviechat": "Llava_OneVision_MovieChat",
 }
 
 
